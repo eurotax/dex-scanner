@@ -1,0 +1,32 @@
+services:
+  - type: worker
+    name: dex-scanner
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CHAIN_ID
+        sync: false
+      - key: RPC_URL
+        sync: false
+      - key: ETHERSCAN_API_KEY
+        sync: false
+      - key: ETHERSCAN_API_URL
+        sync: false
+      - key: FACTORY_ADDRESS
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: POLL_INTERVAL
+        value: 60000
+      - key: BACKOFF_MAX_RETRIES
+        value: 5
+      - key: BACKOFF_INITIAL_DELAY
+        value: 1000
+      - key: BACKOFF_MAX_DELAY
+        value: 60000

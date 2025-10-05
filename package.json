@@ -1,0 +1,19 @@
+{
+  "name": "dex-scanner",
+  "version": "1.0.0",
+  "description": "Background worker for DEX pair monitoring",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": ["dex", "scanner", "blockchain", "monitor"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
