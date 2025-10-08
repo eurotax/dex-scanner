@@ -3,14 +3,15 @@ import { ProviderService } from './src/services/provider.js';
 import { PairMonitorService } from './src/services/pairMonitor.js';
 
 async function main() {
-  console.log('═══════════════════════════════════════════════════');
-  console.log('           DEX Scanner Background Worker          ');
-  console.log('═══════════════════════════════════════════════════');
-  console.log('');
-
   try {
+    console.log('');
+    console.log('═══════════════════════════════════════════════════');
+    console.log('           🚀 DEX PAIR SCANNER v2.0');
+    console.log('═══════════════════════════════════════════════════');
+    console.log('');
+
     // Validate configuration
-    console.log('📋 Validating configuration...');
+    console.log('⚙️  Validating configuration...');
     validateConfig();
     console.log('✅ Configuration validated');
     console.log('');
@@ -18,10 +19,13 @@ async function main() {
     // Initialize provider
     console.log('🔌 Connecting to blockchain...');
     const providerService = new ProviderService();
-    const provider = await providerService.connect();
+    const provider = await providerService.initialize();
+    console.log('✅ Connected to blockchain');
     
-    const blockNumber = await providerService.getBlockNumber();
-    console.log(`✅ Connected! Current block: ${blockNumber}`);
+    const network = await provider.provider.getNetwork();
+    const blockNumber = await provider.provider.getBlockNumber();
+    console.log(`   Network: ${network.name} (${network.chainId})`);
+    console.log(`   Current block: ${blockNumber}`);
     console.log('');
 
     // Initialize and start pair monitor
@@ -35,7 +39,7 @@ async function main() {
     await pairMonitor.start();
     console.log('');
     console.log('═══════════════════════════════════════════════════');
-    console.log('  Monitoring active. Press Ctrl+C to stop.        ');
+    console.log('  ✅ Monitoring active. Press Ctrl+C to stop.      ');
     console.log('═══════════════════════════════════════════════════');
     console.log('');
 
@@ -43,7 +47,10 @@ async function main() {
     const shutdown = async (signal) => {
       console.log(`\n\n🛑 Received ${signal}, shutting down gracefully...`);
       
+      // Stop pair monitor (this will send remaining queued messages)
       await pairMonitor.stop();
+      
+      // Disconnect provider
       await providerService.disconnect();
       
       console.log('✅ Shutdown complete');
