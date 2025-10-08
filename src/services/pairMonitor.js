@@ -1,19 +1,36 @@
 import { config } from '../config.js';
 import { TelegramService } from './telegram.js';
 import { TokenService } from './token.js';
+import { PriceCacheService } from './priceCache.js';
+import { LiquidityFilterService } from './liquidityFilter.js';
+import { SecurityChecksService } from './securityChecks.js';
 
 export class PairMonitorService {
   constructor(provider) {
     this.provider = provider;
     this.telegram = new TelegramService();
     this.tokenService = new TokenService(provider);
+    this.priceCache = new PriceCacheService();
+    this.liquidityFilter = new LiquidityFilterService(provider.provider, this.priceCache);
+    this.securityChecks = new SecurityChecksService(provider.provider);
     this.processedPairs = new Set();
     this.isMonitoring = false;
     this.pollInterval = null;
+    
+    // Statistics
+    this.stats = {
+      total: 0,
+      filtered: 0,
+      vip: 0,
+      public: 0,
+    };
   }
 
   async initialize() {
     console.log('Initializing pair monitor service...');
+    
+    // Initialize price cache
+    this.priceCache.initialize();
     
     // Initialize Telegram bot
     this.telegram.initialize();
@@ -45,8 +62,12 @@ export class PairMonitorService {
       this.pollInterval = null;
     }
     
-    // Shutdown telegram service (sends remaining queued messages)
+    // Shutdown services
+    this.priceCache.shutdown();
     await this.telegram.shutdown();
+    
+    // Print statistics
+    this.printStatistics();
     
     console.log('✅ Pair monitoring stopped');
   }
@@ -56,6 +77,8 @@ export class PairMonitorService {
     const pollInterval = config.monitoring.eventPollInterval;
 
     console.log(`🔍 Monitoring factory: ${factoryAddress}`);
+    console.log(`💧 VIP liquidity threshold: $${config.liquidity.minVIP.toLocaleString()}`);
+    console.log(`💧 Public liquidity threshold: $${config.liquidity.minPublic.toLocaleString()}`);
     console.log(`⏱️  Poll interval: ${pollInterval}ms\n`);
 
     // Factory ABI (minimal - only PairCreated event)
@@ -116,6 +139,7 @@ export class PairMonitorService {
     }
 
     this.processedPairs.add(pairAddress);
+    this.stats.total++;
 
     console.log(`\n🆕 New pair detected!`);
     console.log(`   Address: ${pairAddress}`);
@@ -123,48 +147,79 @@ export class PairMonitorService {
     console.log(`   TX: ${event.transactionHash}`);
 
     try {
-      // Fetch token information
+      // Step 1: Analyze liquidity
+      console.log('   💧 Analyzing liquidity...');
+      const liquidityAnalysis = await this.liquidityFilter.analyzePair(pairAddress);
+
+      if (!liquidityAnalysis.success) {
+        console.log(`   ⏭️  Filtered: ${liquidityAnalysis.message}`);
+        this.stats.filtered++;
+        return;
+      }
+
+      console.log(`   💧 Liquidity: ${this.liquidityFilter.formatLiquidity(liquidityAnalysis.liquidityUSD)}`);
+
+      // Check if meets thresholds
+      if (!liquidityAnalysis.shouldAlertVIP && !liquidityAnalysis.shouldAlertPublic) {
+        console.log(`   ⏭️  Below minimum liquidity threshold`);
+        this.stats.filtered++;
+        return;
+      }
+
+      // Step 2: Fetch token information
+      console.log('   🪙 Fetching token info...');
       const token0Info = await this.tokenService.getTokenInfo(event.args.token0);
       const token1Info = await this.tokenService.getTokenInfo(event.args.token1);
 
-      // Get pair reserves
-      const pairAbi = [
-        'function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)'
-      ];
-
-      const pair = new this.provider.ethers.Contract(
-        pairAddress,
-        pairAbi,
-        this.provider.provider
-      );
-
-      const reserves = await pair.getReserves();
-
       console.log(`   Token0: ${token0Info.symbol} (${token0Info.name})`);
       console.log(`   Token1: ${token1Info.symbol} (${token1Info.name})`);
-      console.log(`   Reserve0: ${reserves.reserve0.toString()}`);
-      console.log(`   Reserve1: ${reserves.reserve1.toString()}`);
 
-      // Send Telegram notification
-      await this.telegram.sendPairCreated({
+      // Step 3: Security checks
+      console.log('   🔒 Running security checks...');
+      const securityChecks = await this.securityChecks.performChecks(
+        event.args.token0,
+        pairAddress
+      );
+
+      const checksFormat = this.securityChecks.formatChecks(securityChecks);
+      console.log(`   Security: ${checksFormat.shortFormat} (${securityChecks.score}/3)`);
+
+      // Step 4: Send notifications based on thresholds
+      const pairData = {
         pairAddress,
         token0: {
           address: event.args.token0,
           symbol: token0Info.symbol,
           name: token0Info.name,
           decimals: token0Info.decimals,
-          reserve: reserves.reserve0.toString(),
+          reserve: liquidityAnalysis.reserves.reserve0,
         },
         token1: {
           address: event.args.token1,
           symbol: token1Info.symbol,
           name: token1Info.name,
           decimals: token1Info.decimals,
-          reserve: reserves.reserve1.toString(),
+          reserve: liquidityAnalysis.reserves.reserve1,
         },
         blockNumber: event.blockNumber,
         transactionHash: event.transactionHash,
-      });
+        liquidityUSD: liquidityAnalysis.liquidityUSD,
+        liquidityFormatted: this.liquidityFilter.formatLiquidity(liquidityAnalysis.liquidityUSD),
+        securityChecks: checksFormat,
+      };
+
+      // Send to appropriate channels
+      if (liquidityAnalysis.shouldAlertVIP) {
+        console.log(`   📱 Sending to VIP channel`);
+        await this.telegram.sendPairCreated(pairData, 'vip');
+        this.stats.vip++;
+      }
+
+      if (liquidityAnalysis.shouldAlertPublic) {
+        console.log(`   📱 Adding to Public channel queue`);
+        await this.telegram.sendPairCreated(pairData, 'public');
+        this.stats.public++;
+      }
 
       console.log(`✅ Pair processed successfully\n`);
 
@@ -172,5 +227,14 @@ export class PairMonitorService {
       console.error(`❌ Error processing pair ${pairAddress}:`, error.message);
       await this.telegram.sendError(error);
     }
+  }
+
+  printStatistics() {
+    console.log('\n📊 MONITORING STATISTICS:');
+    console.log(`   Total pairs detected: ${this.stats.total}`);
+    console.log(`   Filtered (low liquidity): ${this.stats.filtered}`);
+    console.log(`   Sent to VIP: ${this.stats.vip}`);
+    console.log(`   Sent to Public: ${this.stats.public}`);
+    console.log('');
   }
 }
