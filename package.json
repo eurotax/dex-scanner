@@ -1,19 +1,32 @@
 {
   "name": "dex-scanner",
-  "version": "1.0.0",
-  "description": "Background worker for DEX pair monitoring",
+  "version": "1.1.0",
+  "description": "Background worker for DEX pair monitoring with improved polling support",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "test": "node test-connection.js"
   },
-  "keywords": ["dex", "scanner", "blockchain", "monitor"],
+  "keywords": [
+    "dex",
+    "scanner",
+    "blockchain",
+    "monitor",
+    "uniswap",
+    "pancakeswap",
+    "ethereum",
+    "bsc"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.4.5",
     "ethers": "^6.13.4",
     "node-telegram-bot-api": "^0.66.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }
