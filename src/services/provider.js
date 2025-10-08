@@ -6,11 +6,12 @@ export class ProviderService {
     this.rpcUrl = rpcUrl || config.rpcUrl;
     this.provider = null;
     this.network = null;
+    this.ethers = ethers; // Eksportuj ethers dla użycia w innych serwisach
   }
 
-  async connect() {
+  async initialize() {
     if (this.provider) {
-      return this.provider;
+      return this;
     }
 
     try {
@@ -32,7 +33,7 @@ export class ProviderService {
         console.warn('This may cause issues. Please check your RPC_URL and CHAIN_ID settings.');
       }
       
-      return this.provider;
+      return this;
     } catch (error) {
       console.error('Failed to connect to RPC provider:', error.message);
       console.error('Please check your RPC_URL configuration');
@@ -42,7 +43,7 @@ export class ProviderService {
 
   getProvider() {
     if (!this.provider) {
-      throw new Error('Provider not initialized. Call connect() first.');
+      throw new Error('Provider not initialized. Call initialize() first.');
     }
     return this.provider;
   }
