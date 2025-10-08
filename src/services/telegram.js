@@ -7,12 +7,7 @@ export class TelegramService {
     this.vipChatId = vipChatId || config.telegram.vipChatId;
     this.publicChatId = publicChatId || config.telegram.publicChatId;
     this.legacyChatId = config.telegram.chatId;
-    this.publicChannelInterval = config.telegram.publicChannelInterval;
     this.bot = null;
-    
-    // Queue for public channel (aggregated updates)
-    this.publicQueue = [];
-    this.publicChannelTimer = null;
     
     // Normalize public chat ID (add @ if it's a username without @ or -)
     if (this.publicChatId && typeof this.publicChatId === 'string') {
@@ -32,8 +27,7 @@ export class TelegramService {
       }
       
       if (this.publicChatId) {
-        console.log(`   📱 Public channel: ${this.publicChatId} (aggregated every ${this.publicChannelInterval / 1000 / 60} minutes, >${config.liquidity.minPublic / 1000}k USD)`);
-        this.startPublicChannelTimer();
+        console.log(`   📱 Public channel: ${this.publicChatId} (instant alerts, >${config.liquidity.minPublic / 1000}k USD)`);
       }
       
       if (this.legacyChatId && !this.vipChatId) {
@@ -41,18 +35,6 @@ export class TelegramService {
       }
     }
     return this.bot;
-  }
-
-  startPublicChannelTimer() {
-    if (this.publicChannelTimer) {
-      clearInterval(this.publicChannelTimer);
-    }
-    
-    this.publicChannelTimer = setInterval(async () => {
-      await this.sendAggregatedToPublic();
-    }, this.publicChannelInterval);
-    
-    console.log(`   ⏰ Public channel timer started (every ${this.publicChannelInterval / 1000 / 60} minutes)`);
   }
 
   async sendMessage(chatId, message, options = {}) {
@@ -86,64 +68,16 @@ export class TelegramService {
     }
   }
 
-  async addToPublicQueue(pairData) {
+  async sendToPublicChannel(message, options = {}) {
     if (!this.publicChatId) {
-      return;
+      return null;
     }
-    
-    this.publicQueue.push({
-      ...pairData,
-      timestamp: Date.now(),
-    });
-    
-    console.log(`📋 Added to public queue (total: ${this.publicQueue.length})`);
-  }
-
-  async sendAggregatedToPublic() {
-    if (!this.publicChatId || this.publicQueue.length === 0) {
-      return;
-    }
-    
-    console.log(`\n📤 Sending aggregated update to public channel (${this.publicQueue.length} pairs)`);
     
     try {
-      const totalPairs = this.publicQueue.length;
-      const intervalMinutes = this.publicChannelInterval / 1000 / 60;
-      
-      let message = `🔔 *High Liquidity Pairs Update*\n\n`;
-      message += `📊 ${totalPairs} pair${totalPairs > 1 ? 's' : ''} with >$${config.liquidity.minPublic / 1000}k liquidity detected\n\n`;
-      
-      // Show first 10 pairs in detail
-      const pairsToShow = Math.min(10, totalPairs);
-      
-      for (let i = 0; i < pairsToShow; i++) {
-        const pair = this.publicQueue[i];
-        message += `${i + 1}. ${pair.token0Symbol}/${pair.token1Symbol}\n`;
-        message += `   💧 ${pair.liquidityFormatted}\n`;
-        message += `   ${pair.securityShort} Security\n`;
-        message += `   📍 \`${pair.pairAddress.substring(0, 10)}...${pair.pairAddress.slice(-6)}\`\n`;
-        
-        if (i < pairsToShow - 1) {
-          message += '\n';
-        }
-      }
-      
-      // If there are more pairs, show count
-      if (totalPairs > pairsToShow) {
-        message += `\n\n...and ${totalPairs - pairsToShow} more pair${totalPairs - pairsToShow > 1 ? 's' : ''}`;
-      }
-      
-      message += `\n\n💎 Want detailed instant alerts? Join VIP channel!`;
-      
-      await this.sendMessage(this.publicChatId, message);
-      console.log(`✅ Sent aggregated update to public channel`);
-      
-      // Clear the queue after sending
-      this.publicQueue = [];
-      
+      return await this.sendMessage(this.publicChatId, message, options);
     } catch (error) {
-      console.error('❌ Failed to send aggregated update:', error.message);
-      // Don't clear queue on error - will retry in next interval
+      console.error('❌ Failed to send to Public channel:', error.message);
+      throw error;
     }
   }
 
@@ -157,6 +91,15 @@ export class TelegramService {
       promises.push(
         this.sendToVipChannel(startupMsg).catch(err => 
           console.error('Failed to send startup to VIP:', err.message)
+        )
+      );
+    }
+    
+    // Send to Public channel
+    if (this.publicChatId) {
+      promises.push(
+        this.sendToPublicChannel(startupMsg).catch(err => 
+          console.error('Failed to send startup to Public:', err.message)
         )
       );
     }
@@ -185,9 +128,8 @@ export class TelegramService {
       securityChecks,
     } = pairData;
     
-    // VIP channel - detailed message
-    if (channel === 'vip' || channel === 'both') {
-      const vipMessage = `
+    // Create message
+    const message = `
 🆕 *New High Liquidity Pair*
 
 📍 Pair: \`${pairAddress}\`
@@ -207,13 +149,15 @@ ${securityChecks.longFormat}
 
 🔗 Block: ${blockNumber || 'N/A'}
 📝 TX: \`${transactionHash || 'N/A'}\`
-      `.trim();
+    `.trim();
 
-      const promises = [];
-      
+    const promises = [];
+    
+    // Send to VIP channel
+    if (channel === 'vip' || channel === 'both') {
       if (this.vipChatId) {
         promises.push(
-          this.sendToVipChannel(vipMessage).catch(err => 
+          this.sendToVipChannel(message).catch(err => 
             console.error('Failed to send to VIP:', err.message)
           )
         );
@@ -221,29 +165,25 @@ ${securityChecks.longFormat}
       
       if (this.legacyChatId && !this.vipChatId) {
         promises.push(
-          this.sendMessage(this.legacyChatId, vipMessage).catch(err => 
+          this.sendMessage(this.legacyChatId, message).catch(err => 
             console.error('Failed to send to legacy:', err.message)
           )
         );
       }
-      
-      await Promise.allSettled(promises);
     }
     
-    // Public channel - add to queue
+    // Send to Public channel (instant, no queue!)
     if (channel === 'public' || channel === 'both') {
       if (this.publicChatId) {
-        await this.addToPublicQueue({
-          pairAddress,
-          token0Symbol: token0.symbol || '???',
-          token1Symbol: token1.symbol || '???',
-          liquidityFormatted,
-          securityShort: securityChecks.shortFormat,
-          blockNumber,
-          transactionHash,
-        });
+        promises.push(
+          this.sendToPublicChannel(message).catch(err => 
+            console.error('Failed to send to Public:', err.message)
+          )
+        );
       }
     }
+    
+    await Promise.allSettled(promises);
   }
 
   async sendError(error) {
@@ -278,20 +218,6 @@ ${error.message || error.toString()}
 
   async shutdown() {
     console.log('🛑 Shutting down Telegram service...');
-    
-    // Stop the public channel timer
-    if (this.publicChannelTimer) {
-      clearInterval(this.publicChannelTimer);
-      this.publicChannelTimer = null;
-      console.log('   ⏰ Public channel timer stopped');
-    }
-    
-    // Send any remaining queued messages to public channel
-    if (this.publicQueue.length > 0) {
-      console.log(`   📤 Sending ${this.publicQueue.length} remaining messages to public channel...`);
-      await this.sendAggregatedToPublic();
-    }
-    
     console.log('✅ Telegram service shutdown complete');
   }
 }
