@@ -56,16 +56,22 @@ export class FactoryService {
     
     console.log('Listening for PairCreated events...');
     
-    contract.on('PairCreated', (token0, token1, pair, pairIndex, event) => {
-      callback({
-        token0,
-        token1,
-        pair,
-        pairIndex: Number(pairIndex),
-        blockNumber: event.log.blockNumber,
-        transactionHash: event.log.transactionHash,
+    try {
+      contract.on('PairCreated', (token0, token1, pair, pairIndex, event) => {
+        callback({
+          token0,
+          token1,
+          pair,
+          pairIndex: Number(pairIndex),
+          blockNumber: event.log.blockNumber,
+          transactionHash: event.log.transactionHash,
+        });
       });
-    });
+    } catch (error) {
+      console.warn('⚠️  Event listening not supported by RPC provider:', error.message);
+      console.warn('   Falling back to polling-only mode');
+      throw error; // Re-throw to let caller know event listening failed
+    }
   }
 
   stopListening() {

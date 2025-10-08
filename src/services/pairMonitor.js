@@ -40,13 +40,18 @@ export class PairMonitorService {
       console.error('Failed to send startup message:', error.message);
     }
 
-    // Listen for new pair creation events
-    this.factoryService.listenForPairCreated(async (eventData) => {
-      await this.handleNewPair(eventData);
-    });
+    // Try to listen for new pair creation events (may not be supported by all RPC providers)
+    try {
+      await this.factoryService.listenForPairCreated(async (eventData) => {
+        await this.handleNewPair(eventData);
+      });
+    } catch (error) {
+      console.warn('⚠️  Could not setup event listener:', error.message);
+      console.warn('   Continuing with polling-only mode');
+    }
 
-    // Also poll for new pairs periodically
-    this.startPolling();
+    // Also poll for new pairs periodically (primary monitoring method)
+    await this.startPolling();
   }
 
   async handleNewPair(eventData) {
@@ -93,8 +98,16 @@ export class PairMonitorService {
     
     console.log(`Starting polling every ${pollInterval}ms`);
     
-    let lastCheckedIndex = await this.factoryService.getAllPairsLength();
-    console.log(`Initial pair count: ${lastCheckedIndex}`);
+    let lastCheckedIndex;
+    try {
+      lastCheckedIndex = await this.factoryService.getAllPairsLength();
+      console.log(`Initial pair count: ${lastCheckedIndex}`);
+    } catch (error) {
+      console.error('❌ Failed to get initial pair count:', error.message);
+      console.error('   Factory address may be incorrect for this network');
+      console.error('   Please verify FACTORY_ADDRESS matches the network CHAIN_ID');
+      throw error; // Re-throw to stop the service as it can't function without this
+    }
     
     setInterval(async () => {
       if (!this.isRunning) {
