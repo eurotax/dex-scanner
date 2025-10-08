@@ -41,6 +41,17 @@ export const config = {
     chatId: process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHAT_ID_VIP,
   },
   
+  liquidity: {
+    // Minimum liquidity thresholds in USD
+    minVIP: parseInt(process.env.MIN_LIQUIDITY_VIP || '10000', 10),      // $10k for VIP
+    minPublic: parseInt(process.env.MIN_LIQUIDITY_PUBLIC || '35000', 10), // $35k for Public
+  },
+  
+  priceCache: {
+    // Update interval for price cache (default: 5 minutes)
+    updateInterval: parseInt(process.env.PRICE_UPDATE_INTERVAL || '300000', 10),
+  },
+  
   monitoring: {
     pollInterval: parseInt(process.env.POLL_INTERVAL || '60000', 10),
     eventPollInterval: parseInt(process.env.EVENT_POLL_INTERVAL || '30000', 10),
@@ -104,6 +115,11 @@ export function validateConfig() {
   console.log(`   Factory Address: ${config.factory.address}`);
   console.log(`   Poll Interval: ${config.monitoring.pollInterval}ms`);
   console.log(`   Event Poll Interval: ${config.monitoring.eventPollInterval}ms`);
+  
+  // Show liquidity thresholds
+  console.log('\n💧 Liquidity Filters:');
+  console.log(`   VIP channel: >$${config.liquidity.minVIP.toLocaleString()} USD`);
+  console.log(`   Public channel: >$${config.liquidity.minPublic.toLocaleString()} USD`);
   
   // Show Telegram channels configuration
   console.log('\n📱 Telegram Channels:');
