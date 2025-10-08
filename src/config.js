@@ -27,7 +27,18 @@ export const config = {
   
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN,
-    chatId: process.env.TELEGRAM_CHAT_ID,
+    
+    // VIP channel - all alerts immediately
+    vipChatId: process.env.TELEGRAM_CHAT_ID_VIP,
+    
+    // Public channel - aggregated alerts every 2 hours
+    publicChatId: process.env.TELEGRAM_CHAT_ID_PUBLIC,
+    
+    // Public channel interval in milliseconds (default: 2 hours = 7200000ms)
+    publicChannelInterval: parseInt(process.env.PUBLIC_CHANNEL_INTERVAL || '7200000', 10),
+    
+    // Legacy fallback for backward compatibility
+    chatId: process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHAT_ID_VIP,
   },
   
   monitoring: {
@@ -74,8 +85,9 @@ export function validateConfig() {
     errors.push('TELEGRAM_BOT_TOKEN is required');
   }
   
-  if (!config.telegram.chatId) {
-    errors.push('TELEGRAM_CHAT_ID is required');
+  // Check if at least one Telegram channel is configured
+  if (!config.telegram.vipChatId && !config.telegram.publicChatId && !config.telegram.chatId) {
+    errors.push('At least one Telegram channel is required (TELEGRAM_CHAT_ID_VIP or TELEGRAM_CHAT_ID_PUBLIC or TELEGRAM_CHAT_ID)');
   }
   
   if (config.chainId !== 1 && !process.env.FACTORY_ADDRESS) {
@@ -92,6 +104,18 @@ export function validateConfig() {
   console.log(`   Factory Address: ${config.factory.address}`);
   console.log(`   Poll Interval: ${config.monitoring.pollInterval}ms`);
   console.log(`   Event Poll Interval: ${config.monitoring.eventPollInterval}ms`);
+  
+  // Show Telegram channels configuration
+  console.log('\n📱 Telegram Channels:');
+  if (config.telegram.vipChatId) {
+    console.log(`   ✅ VIP Channel: ${config.telegram.vipChatId} (instant alerts)`);
+  }
+  if (config.telegram.publicChatId) {
+    console.log(`   ✅ Public Channel: ${config.telegram.publicChatId} (aggregated every ${config.telegram.publicChannelInterval / 1000 / 60} minutes)`);
+  }
+  if (config.telegram.chatId && !config.telegram.vipChatId) {
+    console.log(`   ✅ Legacy Channel: ${config.telegram.chatId}`);
+  }
   
   if (warnings.length > 0) {
     console.log('\n⚠️ Warnings:');
