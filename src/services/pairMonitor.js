@@ -1,186 +1,176 @@
-import { FactoryService } from './factory.js';
-import { ChecksService } from './checks.js';
-import { TelegramService } from './telegram.js';
 import { config } from '../config.js';
+import { TelegramService } from './telegram.js';
+import { TokenService } from './token.js';
 
 export class PairMonitorService {
   constructor(provider) {
     this.provider = provider;
-    this.factoryService = null;
-    this.checksService = null;
-    this.telegramService = null;
-    this.isRunning = false;
+    this.telegram = new TelegramService();
+    this.tokenService = new TokenService(provider);
     this.processedPairs = new Set();
-    this.eventPollingInterval = null;
-    this.indexPollingInterval = null;
+    this.isMonitoring = false;
+    this.pollInterval = null;
   }
 
   async initialize() {
-    this.factoryService = new FactoryService(this.provider);
-    await this.factoryService.initialize();
+    console.log('Initializing pair monitor service...');
     
-    this.checksService = new ChecksService(this.provider);
+    // Initialize Telegram bot
+    this.telegram.initialize();
     
-    this.telegramService = new TelegramService();
-    this.telegramService.initialize();
+    // Send startup notification
+    await this.telegram.sendStartupMessage();
     
-    console.log('✅ Pair monitor initialized');
+    console.log('Pair monitor service initialized');
   }
 
   async start() {
-    if (this.isRunning) {
-      console.log('Pair monitor is already running');
+    if (this.isMonitoring) {
+      console.log('⚠️ Monitoring already active');
       return;
     }
 
-    this.isRunning = true;
-    console.log('Starting pair monitor...');
-
-    try {
-      await this.telegramService.sendStatus('🚀 DEX Scanner started and monitoring for new pairs');
-    } catch (error) {
-      console.error('Failed to send startup message:', error.message);
-    }
-
-    let useWebSocket = false;
-    try {
-      await this.factoryService.listenForPairCreated(async (eventData) => {
-        await this.handleNewPair(eventData);
-      });
-      useWebSocket = true;
-      console.log('✅ Using WebSocket event listener');
-    } catch (error) {
-      console.log('⚠️ WebSocket not available, using polling mode');
-    }
-
-    if (!useWebSocket) {
-      this.eventPollingInterval = await this.factoryService.pollForNewPairs(
-        async (eventData) => {
-          await this.handleNewPair(eventData);
-        },
-        config.monitoring.eventPollInterval
-      );
-    }
-
-    this.startIndexPolling();
-  }
-
-  async handleNewPair(eventData) {
-    const { pair, token0, token1, pairIndex, blockNumber, transactionHash } = eventData;
+    this.isMonitoring = true;
+    console.log('▶️  Starting pair monitoring...');
     
-    const pairKey = pair.toLowerCase();
-    
-    if (this.processedPairs.has(pairKey)) {
-      return;
-    }
-    
-    this.processedPairs.add(pairKey);
-    
-    console.log(`\n🆕 New pair detected: ${pair}`);
-    console.log(`   Token0: ${token0}`);
-    console.log(`   Token1: ${token1}`);
-    console.log(`   Index: ${pairIndex}`);
-    console.log(`   Block: ${blockNumber}`);
-    console.log(`   TX: ${transactionHash}`);
-
-    try {
-      const pairInfo = await this.checksService.checkPair(pair);
-      
-      await this.telegramService.sendPairAlert({
-        ...pairInfo,
-        blockNumber,
-        transactionHash,
-      });
-      
-      console.log(`✅ Notification sent for pair ${pair}`);
-    } catch (error) {
-      console.error(`❌ Error processing pair ${pair}:`, error.message);
-      
-      try {
-        await this.telegramService.sendMessage(
-          `🆕 *New Pair Detected*\n\n` +
-          `Pair: \`${pair}\`\n` +
-          `Token0: \`${token0}\`\n` +
-          `Token1: \`${token1}\`\n` +
-          `Block: ${blockNumber}\n` +
-          `TX: \`${transactionHash}\`\n\n` +
-          `⚠️ Could not fetch detailed info: ${error.message}`
-        );
-      } catch (telegramError) {
-        console.error('Failed to send error notification:', telegramError.message);
-      }
-    }
-  }
-
-  async startIndexPolling() {
-    const pollInterval = config.monitoring.pollInterval;
-    
-    console.log(`Starting index polling every ${pollInterval}ms`);
-    
-    let lastCheckedIndex = await this.factoryService.getAllPairsLength();
-    console.log(`Initial pair count: ${lastCheckedIndex}`);
-    
-    this.indexPollingInterval = setInterval(async () => {
-      if (!this.isRunning) {
-        return;
-      }
-      
-      try {
-        const currentLength = await this.factoryService.getAllPairsLength();
-        
-        if (currentLength > lastCheckedIndex) {
-          console.log(`\nNew pairs detected via index! Total: ${currentLength} (was: ${lastCheckedIndex})`);
-          
-          for (let i = lastCheckedIndex; i < currentLength; i++) {
-            try {
-              const pairAddress = await this.factoryService.getPairAtIndex(i);
-              
-              if (!this.processedPairs.has(pairAddress.toLowerCase())) {
-                await this.handleNewPair({
-                  pair: pairAddress,
-                  token0: 'Unknown',
-                  token1: 'Unknown',
-                  pairIndex: i,
-                  blockNumber: null,
-                  transactionHash: null,
-                });
-              }
-            } catch (error) {
-              console.error(`Error checking pair at index ${i}:`, error.message);
-            }
-          }
-          
-          lastCheckedIndex = currentLength;
-        }
-      } catch (error) {
-        console.error('Error during index polling:', error.message);
-      }
-    }, pollInterval);
+    await this.monitorPairs();
   }
 
   async stop() {
-    if (!this.isRunning) {
-      console.log('Pair monitor is not running');
+    console.log('⏸️  Stopping pair monitoring...');
+    this.isMonitoring = false;
+    
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
+    
+    // Shutdown telegram service (sends remaining queued messages)
+    await this.telegram.shutdown();
+    
+    console.log('✅ Pair monitoring stopped');
+  }
+
+  async monitorPairs() {
+    const factoryAddress = config.factory.address;
+    const pollInterval = config.monitoring.eventPollInterval;
+
+    console.log(`🔍 Monitoring factory: ${factoryAddress}`);
+    console.log(`⏱️  Poll interval: ${pollInterval}ms\n`);
+
+    // Factory ABI (minimal - only PairCreated event)
+    const factoryAbi = [
+      'event PairCreated(address indexed token0, address indexed token1, address pair, uint256)'
+    ];
+
+    const factory = new this.provider.ethers.Contract(
+      factoryAddress,
+      factoryAbi,
+      this.provider.provider
+    );
+
+    let lastBlock = await this.provider.provider.getBlockNumber();
+    console.log(`📍 Starting from block: ${lastBlock}\n`);
+
+    const checkForNewPairs = async () => {
+      try {
+        const currentBlock = await this.provider.provider.getBlockNumber();
+
+        if (currentBlock > lastBlock) {
+          console.log(`🔎 Checking blocks ${lastBlock + 1} to ${currentBlock}...`);
+
+          const filter = factory.filters.PairCreated();
+          const events = await factory.queryFilter(filter, lastBlock + 1, currentBlock);
+
+          if (events.length > 0) {
+            console.log(`✨ Found ${events.length} new pair(s)!\n`);
+
+            for (const event of events) {
+              await this.processPairCreatedEvent(event);
+            }
+          } else {
+            console.log(`   No new pairs found`);
+          }
+
+          lastBlock = currentBlock;
+        }
+      } catch (error) {
+        console.error('❌ Error checking for new pairs:', error.message);
+        await this.telegram.sendError(error);
+      }
+    };
+
+    // Initial check
+    await checkForNewPairs();
+
+    // Set up polling
+    this.pollInterval = setInterval(checkForNewPairs, pollInterval);
+  }
+
+  async processPairCreatedEvent(event) {
+    const pairAddress = event.args.pair;
+
+    if (this.processedPairs.has(pairAddress)) {
+      console.log(`⏭️  Skipping already processed pair: ${pairAddress}`);
       return;
     }
 
-    this.isRunning = false;
-    
-    if (this.factoryService) {
-      this.factoryService.stopListening(this.eventPollingInterval);
-    }
-    
-    if (this.indexPollingInterval) {
-      clearInterval(this.indexPollingInterval);
-      this.indexPollingInterval = null;
-    }
+    this.processedPairs.add(pairAddress);
+
+    console.log(`\n🆕 New pair detected!`);
+    console.log(`   Address: ${pairAddress}`);
+    console.log(`   Block: ${event.blockNumber}`);
+    console.log(`   TX: ${event.transactionHash}`);
 
     try {
-      await this.telegramService.sendStatus('🛑 DEX Scanner stopped');
-    } catch (error) {
-      console.error('Failed to send shutdown message:', error.message);
-    }
+      // Fetch token information
+      const token0Info = await this.tokenService.getTokenInfo(event.args.token0);
+      const token1Info = await this.tokenService.getTokenInfo(event.args.token1);
 
-    console.log('Pair monitor stopped');
+      // Get pair reserves
+      const pairAbi = [
+        'function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)'
+      ];
+
+      const pair = new this.provider.ethers.Contract(
+        pairAddress,
+        pairAbi,
+        this.provider.provider
+      );
+
+      const reserves = await pair.getReserves();
+
+      console.log(`   Token0: ${token0Info.symbol} (${token0Info.name})`);
+      console.log(`   Token1: ${token1Info.symbol} (${token1Info.name})`);
+      console.log(`   Reserve0: ${reserves.reserve0.toString()}`);
+      console.log(`   Reserve1: ${reserves.reserve1.toString()}`);
+
+      // Send Telegram notification
+      await this.telegram.sendPairCreated({
+        pairAddress,
+        token0: {
+          address: event.args.token0,
+          symbol: token0Info.symbol,
+          name: token0Info.name,
+          decimals: token0Info.decimals,
+          reserve: reserves.reserve0.toString(),
+        },
+        token1: {
+          address: event.args.token1,
+          symbol: token1Info.symbol,
+          name: token1Info.name,
+          decimals: token1Info.decimals,
+          reserve: reserves.reserve1.toString(),
+        },
+        blockNumber: event.blockNumber,
+        transactionHash: event.transactionHash,
+      });
+
+      console.log(`✅ Pair processed successfully\n`);
+
+    } catch (error) {
+      console.error(`❌ Error processing pair ${pairAddress}:`, error.message);
+      await this.telegram.sendError(error);
+    }
   }
 }
