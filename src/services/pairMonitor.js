@@ -11,18 +11,20 @@ export class PairMonitorService {
     this.telegramService = null;
     this.isRunning = false;
     this.processedPairs = new Set();
+    this.eventPollingInterval = null;
+    this.indexPollingInterval = null;
   }
 
-  initialize() {
+  async initialize() {
     this.factoryService = new FactoryService(this.provider);
-    this.factoryService.initialize();
+    await this.factoryService.initialize();
     
     this.checksService = new ChecksService(this.provider);
     
     this.telegramService = new TelegramService();
     this.telegramService.initialize();
     
-    console.log('Pair monitor initialized');
+    console.log('✅ Pair monitor initialized');
   }
 
   async start() {
@@ -40,29 +42,39 @@ export class PairMonitorService {
       console.error('Failed to send startup message:', error.message);
     }
 
-    // Try to listen for new pair creation events (may not be supported by all RPC providers)
+    let useWebSocket = false;
     try {
       await this.factoryService.listenForPairCreated(async (eventData) => {
         await this.handleNewPair(eventData);
       });
+      useWebSocket = true;
+      console.log('✅ Using WebSocket event listener');
     } catch (error) {
-      console.warn('⚠️  Could not setup event listener:', error.message);
-      console.warn('   Continuing with polling-only mode');
+      console.log('⚠️ WebSocket not available, using polling mode');
     }
 
-    // Also poll for new pairs periodically (primary monitoring method)
-    await this.startPolling();
+    if (!useWebSocket) {
+      this.eventPollingInterval = await this.factoryService.pollForNewPairs(
+        async (eventData) => {
+          await this.handleNewPair(eventData);
+        },
+        config.monitoring.eventPollInterval
+      );
+    }
+
+    this.startIndexPolling();
   }
 
   async handleNewPair(eventData) {
     const { pair, token0, token1, pairIndex, blockNumber, transactionHash } = eventData;
     
-    // Skip if already processed
-    if (this.processedPairs.has(pair.toLowerCase())) {
+    const pairKey = pair.toLowerCase();
+    
+    if (this.processedPairs.has(pairKey)) {
       return;
     }
     
-    this.processedPairs.add(pair.toLowerCase());
+    this.processedPairs.add(pairKey);
     
     console.log(`\n🆕 New pair detected: ${pair}`);
     console.log(`   Token0: ${token0}`);
@@ -72,10 +84,8 @@ export class PairMonitorService {
     console.log(`   TX: ${transactionHash}`);
 
     try {
-      // Get detailed pair information
       const pairInfo = await this.checksService.checkPair(pair);
       
-      // Send notification
       await this.telegramService.sendPairAlert({
         ...pairInfo,
         blockNumber,
@@ -85,31 +95,32 @@ export class PairMonitorService {
       console.log(`✅ Notification sent for pair ${pair}`);
     } catch (error) {
       console.error(`❌ Error processing pair ${pair}:`, error.message);
+      
       try {
-        await this.telegramService.sendError(error);
+        await this.telegramService.sendMessage(
+          `🆕 *New Pair Detected*\n\n` +
+          `Pair: \`${pair}\`\n` +
+          `Token0: \`${token0}\`\n` +
+          `Token1: \`${token1}\`\n` +
+          `Block: ${blockNumber}\n` +
+          `TX: \`${transactionHash}\`\n\n` +
+          `⚠️ Could not fetch detailed info: ${error.message}`
+        );
       } catch (telegramError) {
         console.error('Failed to send error notification:', telegramError.message);
       }
     }
   }
 
-  async startPolling() {
+  async startIndexPolling() {
     const pollInterval = config.monitoring.pollInterval;
     
-    console.log(`Starting polling every ${pollInterval}ms`);
+    console.log(`Starting index polling every ${pollInterval}ms`);
     
-    let lastCheckedIndex;
-    try {
-      lastCheckedIndex = await this.factoryService.getAllPairsLength();
-      console.log(`Initial pair count: ${lastCheckedIndex}`);
-    } catch (error) {
-      console.error('❌ Failed to get initial pair count:', error.message);
-      console.error('   Factory address may be incorrect for this network');
-      console.error('   Please verify FACTORY_ADDRESS matches the network CHAIN_ID');
-      throw error; // Re-throw to stop the service as it can't function without this
-    }
+    let lastCheckedIndex = await this.factoryService.getAllPairsLength();
+    console.log(`Initial pair count: ${lastCheckedIndex}`);
     
-    setInterval(async () => {
+    this.indexPollingInterval = setInterval(async () => {
       if (!this.isRunning) {
         return;
       }
@@ -118,28 +129,31 @@ export class PairMonitorService {
         const currentLength = await this.factoryService.getAllPairsLength();
         
         if (currentLength > lastCheckedIndex) {
-          console.log(`\nNew pairs detected! Total: ${currentLength} (was: ${lastCheckedIndex})`);
+          console.log(`\nNew pairs detected via index! Total: ${currentLength} (was: ${lastCheckedIndex})`);
           
-          // Check each new pair
           for (let i = lastCheckedIndex; i < currentLength; i++) {
-            const pairAddress = await this.factoryService.getPairAtIndex(i);
-            
-            if (!this.processedPairs.has(pairAddress.toLowerCase())) {
-              await this.handleNewPair({
-                pair: pairAddress,
-                token0: 'N/A',
-                token1: 'N/A',
-                pairIndex: i,
-                blockNumber: null,
-                transactionHash: null,
-              });
+            try {
+              const pairAddress = await this.factoryService.getPairAtIndex(i);
+              
+              if (!this.processedPairs.has(pairAddress.toLowerCase())) {
+                await this.handleNewPair({
+                  pair: pairAddress,
+                  token0: 'Unknown',
+                  token1: 'Unknown',
+                  pairIndex: i,
+                  blockNumber: null,
+                  transactionHash: null,
+                });
+              }
+            } catch (error) {
+              console.error(`Error checking pair at index ${i}:`, error.message);
             }
           }
           
           lastCheckedIndex = currentLength;
         }
       } catch (error) {
-        console.error('Error during polling:', error.message);
+        console.error('Error during index polling:', error.message);
       }
     }, pollInterval);
   }
@@ -153,7 +167,12 @@ export class PairMonitorService {
     this.isRunning = false;
     
     if (this.factoryService) {
-      this.factoryService.stopListening();
+      this.factoryService.stopListening(this.eventPollingInterval);
+    }
+    
+    if (this.indexPollingInterval) {
+      clearInterval(this.indexPollingInterval);
+      this.indexPollingInterval = null;
     }
 
     try {
