@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { ExplorerFactory } from '../explorers/explorerFactory.js';
+import { withBackoff } from '../utils/backoff.js';
 
 // Minimal ERC20 ABI
 const ERC20_ABI = [
@@ -26,11 +27,16 @@ export class ChecksService {
     const pairContract = new ethers.Contract(pairAddress, PAIR_ABI, this.provider);
     
     try {
-      const [token0Address, token1Address, reserves] = await Promise.all([
-        pairContract.token0(),
-        pairContract.token1(),
-        pairContract.getReserves(),
-      ]);
+      const [token0Address, token1Address, reserves] = await withBackoff(
+        async () => {
+          return await Promise.all([
+            pairContract.token0(),
+            pairContract.token1(),
+            pairContract.getReserves(),
+          ]);
+        },
+        `checkPair(${pairAddress})`
+      );
 
       const [token0Info, token1Info] = await Promise.all([
         this.getTokenInfo(token0Address),
@@ -49,7 +55,7 @@ export class ChecksService {
           ...token1Info,
           reserve: reserves.reserve1.toString(),
         },
-        lastUpdate: reserves.blockTimestampLast,
+        lastUpdate: Number(reserves.blockTimestampLast),
       };
     } catch (error) {
       console.error(`Error checking pair ${pairAddress}:`, error.message);
@@ -60,34 +66,49 @@ export class ChecksService {
   async getTokenInfo(tokenAddress) {
     const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.provider);
     
-    try {
-      const [name, symbol, decimals, totalSupply] = await Promise.all([
-        tokenContract.name().catch(() => 'Unknown'),
-        tokenContract.symbol().catch(() => '???'),
-        tokenContract.decimals().catch(() => 18),
-        tokenContract.totalSupply().catch(() => 0n),
-      ]);
+    const results = await Promise.allSettled([
+      this.callWithTimeout(tokenContract.name(), 5000, 'Unknown'),
+      this.callWithTimeout(tokenContract.symbol(), 5000, '???'),
+      this.callWithTimeout(tokenContract.decimals(), 5000, 18),
+      this.callWithTimeout(tokenContract.totalSupply(), 5000, 0n),
+    ]);
 
-      return {
-        name,
-        symbol,
-        decimals,
-        totalSupply: totalSupply.toString(),
-      };
+    const [name, symbol, decimals, totalSupply] = results.map((result, index) => {
+      if (result.status === 'fulfilled') {
+        return result.value;
+      } else {
+        console.warn(`Failed to get token property ${index} for ${tokenAddress}:`, result.reason.message);
+        return ['Unknown', '???', 18, 0n][index];
+      }
+    });
+
+    return {
+      name: String(name),
+      symbol: String(symbol),
+      decimals: Number(decimals),
+      totalSupply: totalSupply.toString(),
+    };
+  }
+
+  async callWithTimeout(promise, timeoutMs, fallbackValue) {
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout')), timeoutMs)
+        )
+      ]);
     } catch (error) {
-      console.error(`Error getting token info for ${tokenAddress}:`, error.message);
-      return {
-        name: 'Unknown',
-        symbol: '???',
-        decimals: 18,
-        totalSupply: '0',
-      };
+      return fallbackValue;
     }
   }
 
   async isContractVerified(address) {
     try {
-      const sourceCode = await this.explorer.getContractSourceCode(address);
+      const sourceCode = await withBackoff(
+        () => this.explorer.getContractSourceCode(address),
+        `isContractVerified(${address})`
+      );
       return sourceCode.SourceCode !== '';
     } catch (error) {
       console.warn(`Could not check verification for ${address}:`, error.message);
@@ -97,7 +118,10 @@ export class ChecksService {
 
   async getContractCreationInfo(address) {
     try {
-      const creationInfo = await this.explorer.getContractCreation(address);
+      const creationInfo = await withBackoff(
+        () => this.explorer.getContractCreation(address),
+        `getContractCreationInfo(${address})`
+      );
       return creationInfo;
     } catch (error) {
       console.warn(`Could not get creation info for ${address}:`, error.message);
