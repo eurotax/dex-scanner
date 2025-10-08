@@ -27,7 +27,7 @@ async function main() {
     // Initialize and start pair monitor
     console.log('🔍 Initializing pair monitor...');
     const pairMonitor = new PairMonitorService(provider);
-    pairMonitor.initialize();
+    await pairMonitor.initialize();
     console.log('✅ Pair monitor initialized');
     console.log('');
 
