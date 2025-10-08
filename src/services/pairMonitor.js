@@ -184,7 +184,7 @@ export class PairMonitorService {
       const checksFormat = this.securityChecks.formatChecks(securityChecks);
       console.log(`   Security: ${checksFormat.shortFormat} (${securityChecks.score}/3)`);
 
-      // Step 4: Send notifications based on thresholds
+      // Step 4: Prepare pair data
       const pairData = {
         pairAddress,
         token0: {
@@ -208,18 +208,30 @@ export class PairMonitorService {
         securityChecks: checksFormat,
       };
 
-      // Send to appropriate channels
+      // Step 5: Send to appropriate channels (both instant!)
+      const channels = [];
+      
       if (liquidityAnalysis.shouldAlertVIP) {
-        console.log(`   📱 Sending to VIP channel`);
-        await this.telegram.sendPairCreated(pairData, 'vip');
+        channels.push('VIP');
         this.stats.vip++;
       }
 
       if (liquidityAnalysis.shouldAlertPublic) {
-        console.log(`   📱 Adding to Public channel queue`);
-        await this.telegram.sendPairCreated(pairData, 'public');
+        channels.push('Public');
         this.stats.public++;
       }
+
+      console.log(`   📱 Sending to: ${channels.join(' + ')}`);
+
+      // Determine which channel parameter to use
+      let channelParam = 'both';
+      if (liquidityAnalysis.shouldAlertVIP && !liquidityAnalysis.shouldAlertPublic) {
+        channelParam = 'vip';
+      } else if (!liquidityAnalysis.shouldAlertVIP && liquidityAnalysis.shouldAlertPublic) {
+        channelParam = 'public';
+      }
+
+      await this.telegram.sendPairCreated(pairData, channelParam);
 
       console.log(`✅ Pair processed successfully\n`);
 
@@ -233,8 +245,14 @@ export class PairMonitorService {
     console.log('\n📊 MONITORING STATISTICS:');
     console.log(`   Total pairs detected: ${this.stats.total}`);
     console.log(`   Filtered (low liquidity): ${this.stats.filtered}`);
-    console.log(`   Sent to VIP: ${this.stats.vip}`);
-    console.log(`   Sent to Public: ${this.stats.public}`);
+    console.log(`   Sent to VIP (>${config.liquidity.minVIP / 1000}k): ${this.stats.vip}`);
+    console.log(`   Sent to Public (>${config.liquidity.minPublic / 1000}k): ${this.stats.public}`);
+    
+    if (this.stats.vip > 0 || this.stats.public > 0) {
+      const filterRate = ((this.stats.filtered / this.stats.total) * 100).toFixed(1);
+      console.log(`   Filter efficiency: ${filterRate}% filtered out`);
+    }
+    
     console.log('');
   }
 }
