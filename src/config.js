@@ -28,14 +28,11 @@ export const config = {
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN,
     
-    // VIP channel - all alerts immediately
+    // VIP channel - instant alerts for pairs >10k liquidity
     vipChatId: process.env.TELEGRAM_CHAT_ID_VIP,
     
-    // Public channel - aggregated alerts every 2 hours
+    // Public channel - instant alerts for pairs >35k liquidity
     publicChatId: process.env.TELEGRAM_CHAT_ID_PUBLIC,
-    
-    // Public channel interval in milliseconds (default: 2 hours = 7200000ms)
-    publicChannelInterval: parseInt(process.env.PUBLIC_CHANNEL_INTERVAL || '7200000', 10),
     
     // Legacy fallback for backward compatibility
     chatId: process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHAT_ID_VIP,
@@ -117,7 +114,7 @@ export function validateConfig() {
   console.log(`   Event Poll Interval: ${config.monitoring.eventPollInterval}ms`);
   
   // Show liquidity thresholds
-  console.log('\n💧 Liquidity Filters:');
+  console.log('\n💧 Liquidity Filters (Instant Alerts):');
   console.log(`   VIP channel: >$${config.liquidity.minVIP.toLocaleString()} USD`);
   console.log(`   Public channel: >$${config.liquidity.minPublic.toLocaleString()} USD`);
   
@@ -127,7 +124,7 @@ export function validateConfig() {
     console.log(`   ✅ VIP Channel: ${config.telegram.vipChatId} (instant alerts)`);
   }
   if (config.telegram.publicChatId) {
-    console.log(`   ✅ Public Channel: ${config.telegram.publicChatId} (aggregated every ${config.telegram.publicChannelInterval / 1000 / 60} minutes)`);
+    console.log(`   ✅ Public Channel: ${config.telegram.publicChatId} (instant alerts)`);
   }
   if (config.telegram.chatId && !config.telegram.vipChatId) {
     console.log(`   ✅ Legacy Channel: ${config.telegram.chatId}`);
