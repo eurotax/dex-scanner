@@ -16,7 +16,6 @@ export class TelegramService {
     
     // Normalize public chat ID (add @ if it's a username without @ or -)
     if (this.publicChatId && typeof this.publicChatId === 'string') {
-      // If it doesn't start with @ or - (negative number), add @
       if (!this.publicChatId.startsWith('@') && !this.publicChatId.startsWith('-')) {
         this.publicChatId = `@${this.publicChatId}`;
       }
@@ -29,11 +28,11 @@ export class TelegramService {
       console.log('✅ Telegram bot initialized');
       
       if (this.vipChatId) {
-        console.log(`   📱 VIP channel: ${this.vipChatId} (instant alerts)`);
+        console.log(`   📱 VIP channel: ${this.vipChatId} (instant alerts, >${config.liquidity.minVIP / 1000}k USD)`);
       }
       
       if (this.publicChatId) {
-        console.log(`   📱 Public channel: ${this.publicChatId} (aggregated every ${this.publicChannelInterval / 1000 / 60} minutes)`);
+        console.log(`   📱 Public channel: ${this.publicChatId} (aggregated every ${this.publicChannelInterval / 1000 / 60} minutes, >${config.liquidity.minPublic / 1000}k USD)`);
         this.startPublicChannelTimer();
       }
       
@@ -111,8 +110,8 @@ export class TelegramService {
       const totalPairs = this.publicQueue.length;
       const intervalMinutes = this.publicChannelInterval / 1000 / 60;
       
-      let message = `🔔 *New Pairs Update*\n\n`;
-      message += `📊 ${totalPairs} new pair${totalPairs > 1 ? 's' : ''} detected in the last ${intervalMinutes} minutes\n\n`;
+      let message = `🔔 *High Liquidity Pairs Update*\n\n`;
+      message += `📊 ${totalPairs} pair${totalPairs > 1 ? 's' : ''} with >$${config.liquidity.minPublic / 1000}k liquidity detected\n\n`;
       
       // Show first 10 pairs in detail
       const pairsToShow = Math.min(10, totalPairs);
@@ -120,8 +119,9 @@ export class TelegramService {
       for (let i = 0; i < pairsToShow; i++) {
         const pair = this.publicQueue[i];
         message += `${i + 1}. ${pair.token0Symbol}/${pair.token1Symbol}\n`;
+        message += `   💧 ${pair.liquidityFormatted}\n`;
+        message += `   ${pair.securityShort} Security\n`;
         message += `   📍 \`${pair.pairAddress.substring(0, 10)}...${pair.pairAddress.slice(-6)}\`\n`;
-        message += `   🔗 Block: ${pair.blockNumber}\n`;
         
         if (i < pairsToShow - 1) {
           message += '\n';
@@ -133,7 +133,7 @@ export class TelegramService {
         message += `\n\n...and ${totalPairs - pairsToShow} more pair${totalPairs - pairsToShow > 1 ? 's' : ''}`;
       }
       
-      message += `\n\n💎 Want instant alerts? Join VIP channel!`;
+      message += `\n\n💎 Want detailed instant alerts? Join VIP channel!`;
       
       await this.sendMessage(this.publicChatId, message);
       console.log(`✅ Sent aggregated update to public channel`);
@@ -148,7 +148,7 @@ export class TelegramService {
   }
 
   async sendStartupMessage() {
-    const startupMsg = `🚀 *DEX Scanner Started*\n\n✅ Monitoring for new pairs\n⏰ Started at: ${new Date().toLocaleString()}`;
+    const startupMsg = `🚀 *DEX Scanner Started*\n\n✅ Monitoring for new pairs\n💧 Liquidity filters active\n⏰ Started at: ${new Date().toLocaleString()}`;
     
     const promises = [];
     
@@ -170,86 +170,79 @@ export class TelegramService {
       );
     }
     
-    // Don't send to public channel on startup (only aggregated updates)
-    
     await Promise.allSettled(promises);
   }
 
-  async sendPairCreated(pairData) {
-    const { pairAddress, token0, token1, blockNumber, transactionHash } = pairData;
+  async sendPairCreated(pairData, channel = 'both') {
+    const { 
+      pairAddress, 
+      token0, 
+      token1, 
+      blockNumber, 
+      transactionHash,
+      liquidityUSD,
+      liquidityFormatted,
+      securityChecks,
+    } = pairData;
     
-    const message = `
-🆕 *New Pair Created*
+    // VIP channel - detailed message
+    if (channel === 'vip' || channel === 'both') {
+      const vipMessage = `
+🆕 *New High Liquidity Pair*
 
 📍 Pair: \`${pairAddress}\`
 
-🪙 Token 0: ${token0.symbol || '???'}
-   Address: \`${token0.address}\`
-   Reserve: ${this.formatAmount(token0.reserve, token0.decimals)}
+🪙 *Token 0:* ${token0.symbol || '???'}
+   ${token0.name || 'Unknown'}
+   \`${token0.address}\`
 
-🪙 Token 1: ${token1.symbol || '???'}
-   Address: \`${token1.address}\`
-   Reserve: ${this.formatAmount(token1.reserve, token1.decimals)}
+🪙 *Token 1:* ${token1.symbol || '???'}
+   ${token1.name || 'Unknown'}
+   \`${token1.address}\`
+
+💧 *Liquidity:* ${liquidityFormatted}
+
+🔒 *Security Checks:*
+${securityChecks.longFormat}
 
 🔗 Block: ${blockNumber || 'N/A'}
 📝 TX: \`${transactionHash || 'N/A'}\`
-    `.trim();
+      `.trim();
 
-    const promises = [];
-    
-    // Send to VIP channel instantly
-    if (this.vipChatId) {
-      promises.push(
-        this.sendToVipChannel(message).catch(err => 
-          console.error('Failed to send to VIP:', err.message)
-        )
-      );
-    }
-    
-    // Send to legacy channel if no VIP configured
-    if (this.legacyChatId && !this.vipChatId) {
-      promises.push(
-        this.sendMessage(this.legacyChatId, message).catch(err => 
-          console.error('Failed to send to legacy:', err.message)
-        )
-      );
-    }
-    
-    // Add to public channel queue (will be sent in batch later)
-    if (this.publicChatId) {
-      await this.addToPublicQueue({
-        pairAddress,
-        token0Symbol: token0.symbol || '???',
-        token1Symbol: token1.symbol || '???',
-        blockNumber,
-        transactionHash,
-      });
-    }
-    
-    await Promise.allSettled(promises);
-  }
-
-  formatAmount(amount, decimals = 18) {
-    try {
-      const value = BigInt(amount);
-      const divisor = BigInt(10 ** Number(decimals));
-      const integerPart = value / divisor;
-      const fractionalPart = value % divisor;
+      const promises = [];
       
-      if (fractionalPart === 0n) {
-        return integerPart.toString();
+      if (this.vipChatId) {
+        promises.push(
+          this.sendToVipChannel(vipMessage).catch(err => 
+            console.error('Failed to send to VIP:', err.message)
+          )
+        );
       }
       
-      const fractionalStr = fractionalPart.toString().padStart(Number(decimals), '0');
-      const trimmedFractional = fractionalStr.replace(/0+$/, '').substring(0, 6);
-      
-      if (trimmedFractional === '') {
-        return integerPart.toString();
+      if (this.legacyChatId && !this.vipChatId) {
+        promises.push(
+          this.sendMessage(this.legacyChatId, vipMessage).catch(err => 
+            console.error('Failed to send to legacy:', err.message)
+          )
+        );
       }
       
-      return `${integerPart}.${trimmedFractional}`;
-    } catch (error) {
-      return amount.toString();
+      await Promise.allSettled(promises);
+    }
+    
+    // Public channel - add to queue
+    if (channel === 'public' || channel === 'both') {
+      if (this.publicChatId) {
+        await this.addToPublicQueue({
+          pairAddress,
+          token0Symbol: token0.symbol || '???',
+          token1Symbol: token1.symbol || '???',
+          liquidityFormatted,
+          securityShort: securityChecks.shortFormat,
+          blockNumber,
+          transactionHash,
+        });
+      }
     }
   }
 
@@ -279,40 +272,6 @@ ${error.message || error.toString()}
         )
       );
     }
-    
-    // Don't send errors to public channel
-    
-    await Promise.allSettled(promises);
-  }
-
-  async sendStatus(status) {
-    const message = `
-ℹ️ *Status Update*
-
-${status}
-    `.trim();
-
-    const promises = [];
-    
-    // Send status to VIP channel
-    if (this.vipChatId) {
-      promises.push(
-        this.sendToVipChannel(message).catch(err => 
-          console.error('Failed to send status to VIP:', err.message)
-        )
-      );
-    }
-    
-    // Send to legacy channel if no VIP configured
-    if (this.legacyChatId && !this.vipChatId) {
-      promises.push(
-        this.sendMessage(this.legacyChatId, message).catch(err => 
-          console.error('Failed to send status to legacy:', err.message)
-        )
-      );
-    }
-    
-    // Don't send status to public channel
     
     await Promise.allSettled(promises);
   }
