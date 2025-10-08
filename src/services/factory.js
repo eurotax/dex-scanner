@@ -14,9 +14,11 @@ export class FactoryService {
     this.provider = provider;
     this.factoryAddress = factoryAddress || config.factory.address;
     this.contract = null;
+    this.lastProcessedBlock = null;
+    this.usePollingOnly = false;
   }
 
-  initialize() {
+  async initialize() {
     if (!this.contract) {
       this.contract = new ethers.Contract(
         this.factoryAddress,
@@ -24,6 +26,17 @@ export class FactoryService {
         this.provider
       );
       console.log(`Factory contract initialized at ${this.factoryAddress}`);
+      
+      try {
+        await this.contract.allPairsLength();
+        console.log('✅ Factory contract is accessible');
+      } catch (error) {
+        console.error('❌ Factory contract validation failed:', error.message);
+        throw new Error(`Cannot access factory contract at ${this.factoryAddress}. Please check FACTORY_ADDRESS and CHAIN_ID configuration.`);
+      }
+      
+      this.lastProcessedBlock = await this.provider.getBlockNumber();
+      console.log(`Starting from block: ${this.lastProcessedBlock}`);
     }
     return this.contract;
   }
@@ -51,12 +64,60 @@ export class FactoryService {
     return await contract.getPair(tokenA, tokenB);
   }
 
+  async pollForNewPairs(callback, pollInterval = 30000) {
+    console.log(`Starting event polling every ${pollInterval}ms (from block ${this.lastProcessedBlock})`);
+    
+    const poll = async () => {
+      try {
+        const currentBlock = await this.provider.getBlockNumber();
+        
+        if (currentBlock > this.lastProcessedBlock) {
+          const contract = this.getContract();
+          
+          const filter = contract.filters.PairCreated();
+          const events = await contract.queryFilter(
+            filter,
+            this.lastProcessedBlock + 1,
+            currentBlock
+          );
+          
+          if (events.length > 0) {
+            console.log(`Found ${events.length} new PairCreated events`);
+            
+            for (const event of events) {
+              const [token0, token1, pair, pairIndex] = event.args;
+              
+              callback({
+                token0,
+                token1,
+                pair,
+                pairIndex: Number(pairIndex),
+                blockNumber: event.blockNumber,
+                transactionHash: event.transactionHash,
+              });
+            }
+          }
+          
+          this.lastProcessedBlock = currentBlock;
+        }
+      } catch (error) {
+        console.error('Error polling for events:', error.message);
+      }
+    };
+    
+    await poll();
+    
+    const intervalId = setInterval(poll, pollInterval);
+    
+    return intervalId;
+  }
+
   async listenForPairCreated(callback) {
     const contract = this.getContract();
     
-    console.log('Listening for PairCreated events...');
-    
     try {
+      console.log('Attempting to listen for PairCreated events via WebSocket...');
+      
       contract.on('PairCreated', (token0, token1, pair, pairIndex, event) => {
         callback({
           token0,
@@ -67,17 +128,26 @@ export class FactoryService {
           transactionHash: event.log.transactionHash,
         });
       });
+      
+      console.log('✅ WebSocket event listener established');
+      this.usePollingOnly = false;
     } catch (error) {
-      console.warn('⚠️  Event listening not supported by RPC provider:', error.message);
-      console.warn('   Falling back to polling-only mode');
-      throw error; // Re-throw to let caller know event listening failed
+      console.warn('⚠️ WebSocket listener failed:', error.message);
+      console.log('Falling back to polling mode');
+      this.usePollingOnly = true;
+      throw error;
     }
   }
 
-  stopListening() {
+  stopListening(intervalId = null) {
     if (this.contract) {
       this.contract.removeAllListeners('PairCreated');
       console.log('Stopped listening for PairCreated events');
+    }
+    
+    if (intervalId) {
+      clearInterval(intervalId);
+      console.log('Stopped polling interval');
     }
   }
 }
