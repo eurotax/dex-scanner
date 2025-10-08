@@ -49,4 +49,9 @@ export function validateConfig() {
   if (errors.length > 0) {
     throw new Error(`Configuration validation failed:\n${errors.join('\n')}`);
   }
+  
+  // Log warning about factory address and chain ID
+  console.log(`ℹ️  Chain ID: ${config.chainId}`);
+  console.log(`ℹ️  Factory Address: ${config.factory.address}`);
+  console.log(`ℹ️  RPC URL: ${config.rpcUrl}`);
 }
