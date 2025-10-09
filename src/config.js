@@ -72,11 +72,13 @@ function getDefaultRpcUrl(chainId) {
 }
 
 function getDefaultExplorerUrl(chainId) {
+  // Using V2 API endpoints (Multichain API) to avoid deprecation
+  // V1 API will be deprecated on August 15, 2025
   const explorerUrls = {
-    1: 'https://api.etherscan.io/v2/api',
-    56: 'https://api.bscscan.com/api',
-    137: 'https://api.polygonscan.com/api',
-    42161: 'https://api.arbiscan.io/api',
+    1: 'https://api.etherscan.io/v2/api',      // Ethereum V2 API
+    56: 'https://api.bscscan.com/v2/api',      // BSC V2 API
+    137: 'https://api.polygonscan.com/v2/api', // Polygon V2 API
+    42161: 'https://api.arbiscan.io/v2/api',   // Arbitrum V2 API
   };
   return explorerUrls[chainId] || explorerUrls[1];
 }
@@ -110,6 +112,7 @@ export function validateConfig() {
   console.log(`   Chain ID: ${config.chainId}`);
   console.log(`   RPC URL: ${config.rpcUrl}`);
   console.log(`   Factory Address: ${config.factory.address}`);
+  console.log(`   Explorer API: ${config.etherscan.apiUrl} (V2 - future-proof)`);
   console.log(`   Poll Interval: ${config.monitoring.pollInterval}ms`);
   console.log(`   Event Poll Interval: ${config.monitoring.eventPollInterval}ms`);
   
