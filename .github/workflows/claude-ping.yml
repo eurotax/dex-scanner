@@ -6,7 +6,7 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     env:
-      # TU podłączasz sekret po nazwie z GitHuba
+      # wire the GitHub secret into an env var
       ANTHROPIC_API_KEY: ${{ secrets.DEX_SCANER }}
     steps:
       - uses: actions/setup-python@v5
@@ -17,12 +17,11 @@ jobs:
         run: |
           python - <<'PY'
           import os, anthropic
-          # Odczytujesz klucz z ENV (nie wklejasz go w kodzie)
           client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-          r = client.messages.create(
+          resp = client.messages.create(
               model="claude-3-5-sonnet-latest",
               max_tokens=100,
-              messages=[{"role":"user","content":"Napisz: Połączenie z Claude działa."}]
+              messages=[{"role":"user","content":"Say: Claude API connection works."}]
           )
-          print(r.content[0].text)
+          print(resp.content[0].text)
           PY
