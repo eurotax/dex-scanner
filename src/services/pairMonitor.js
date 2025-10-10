@@ -16,6 +16,8 @@ export class PairMonitorService {
     this.processedPairs = new Set();
     this.isMonitoring = false;
     this.pollInterval = null;
+    this.statsInterval = null;
+    this.startTime = null;
     
     // Statistics
     this.stats = {
@@ -23,6 +25,7 @@ export class PairMonitorService {
       filtered: 0,
       vip: 0,
       public: 0,
+      errors: 0,
     };
   }
 
@@ -48,7 +51,16 @@ export class PairMonitorService {
     }
 
     this.isMonitoring = true;
+    this.startTime = Date.now();
     console.log('▶️  Starting pair monitoring...');
+    
+    // Start statistics reporting if enabled
+    if (config.features.sendStats && config.monitoring.statsInterval > 0) {
+      console.log(`📊 Statistics reporting enabled (every ${Math.floor(config.monitoring.statsInterval / 60000)} minutes)`);
+      this.statsInterval = setInterval(() => {
+        this.sendPeriodicStatistics();
+      }, config.monitoring.statsInterval);
+    }
     
     await this.monitorPairs();
   }
@@ -60,6 +72,17 @@ export class PairMonitorService {
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
+    }
+    
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval);
+      this.statsInterval = null;
+    }
+    
+    // Send shutdown message with final statistics
+    if (this.startTime) {
+      const uptime = Date.now() - this.startTime;
+      await this.telegram.sendShutdownMessage(this.stats, uptime);
     }
     
     // Shutdown services
@@ -119,7 +142,11 @@ export class PairMonitorService {
         }
       } catch (error) {
         console.error('❌ Error checking for new pairs:', error.message);
-        await this.telegram.sendError(error);
+        this.stats.errors++;
+        // Only send error notifications for critical errors, not every poll failure
+        if (error.message.includes('CALL_EXCEPTION') || error.message.includes('missing revert')) {
+          await this.telegram.sendError(error);
+        }
       }
     };
 
@@ -182,7 +209,7 @@ export class PairMonitorService {
       );
 
       const checksFormat = this.securityChecks.formatChecks(securityChecks);
-      console.log(`   Security: ${checksFormat.shortFormat} (${securityChecks.score}/3)`);
+      console.log(`   Security: ${checksFormat.shortFormat}`);
 
       // Step 4: Prepare pair data
       const pairData = {
@@ -237,7 +264,19 @@ export class PairMonitorService {
 
     } catch (error) {
       console.error(`❌ Error processing pair ${pairAddress}:`, error.message);
+      this.stats.errors++;
       await this.telegram.sendError(error);
+    }
+  }
+
+  async sendPeriodicStatistics() {
+    try {
+      const uptime = Date.now() - this.startTime;
+      console.log('\n📊 Sending periodic statistics...');
+      await this.telegram.sendStatistics(this.stats, uptime);
+      console.log('✅ Statistics sent\n');
+    } catch (error) {
+      console.error('❌ Failed to send periodic statistics:', error.message);
     }
   }
 
@@ -247,10 +286,18 @@ export class PairMonitorService {
     console.log(`   Filtered (low liquidity): ${this.stats.filtered}`);
     console.log(`   Sent to VIP (>${config.liquidity.minVIP / 1000}k): ${this.stats.vip}`);
     console.log(`   Sent to Public (>${config.liquidity.minPublic / 1000}k): ${this.stats.public}`);
+    console.log(`   Processing errors: ${this.stats.errors}`);
     
     if (this.stats.vip > 0 || this.stats.public > 0) {
       const filterRate = ((this.stats.filtered / this.stats.total) * 100).toFixed(1);
       console.log(`   Filter efficiency: ${filterRate}% filtered out`);
+    }
+    
+    if (this.startTime) {
+      const uptime = Date.now() - this.startTime;
+      const uptimeHours = Math.floor(uptime / 3600000);
+      const uptimeMinutes = Math.floor((uptime % 3600000) / 60000);
+      console.log(`   Uptime: ${uptimeHours}h ${uptimeMinutes}m`);
     }
     
     console.log('');
