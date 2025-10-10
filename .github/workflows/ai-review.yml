@@ -1,0 +1,76 @@
+name: AI Review (Claude)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.DEX_SCANER }}  # your GitHub secret
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install anthropic
+
+      - name: Generate review with Claude
+        run: |
+          python - <<'PY'
+          import os, subprocess, anthropic, sys
+
+          base = os.environ["BASE_SHA"]
+          head = os.environ["HEAD_SHA"]
+
+          # compact diff; keep size reasonable
+          diff = subprocess.check_output(
+              ["git","diff","--unified=0", f"{base}...{head}"],
+              text=True, errors="ignore"
+          )[:150000]
+
+          if not diff.strip():
+              open("review.md","w",encoding="utf-8").write("No changes to review.")
+              sys.exit(0)
+
+          prompt = f"""You are a senior code reviewer.
+          Review the patch below. Point out bugs, security/performance issues,
+          missing tests, and suggest specific fixes with small snippets.
+          Use concise Markdown.
+
+          Patch:
+          {diff}"""
+
+          client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+          resp = client.messages.create(
+              model="claude-3-5-sonnet-latest",
+              max_tokens: 2000,
+              temperature: 0,
+              messages=[{"role":"user","content": prompt}]
+          )
+          open("review.md","w",encoding="utf-8").write(resp.content[0].text.strip() or "No remarks.")
+          PY
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('review.md','utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body
+            });
