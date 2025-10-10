@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "node test-connection.js"
+    "test": "node test-sprint1.js && node test-security-checks.js"
   },
   "keywords": [
     "dex",
