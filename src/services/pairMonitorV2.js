@@ -1,3 +1,4 @@
+import { ethers } from 'ethers';
 import { config } from '../config.js';
 import { TelegramService } from './telegram.js';
 import { TokenService } from './token.js';
@@ -159,9 +160,8 @@ export class PairMonitorV2Service {
 
     // Get provider
     const actualProvider = this.provider.getProvider ? this.provider.getProvider() : this.provider.provider;
-    const ethersLib = this.provider.ethers || (await import('ethers')).ethers;
 
-    const factory = new ethersLib.Contract(
+    const factory = new ethers.Contract(
       factoryAddress,
       factoryAbi,
       actualProvider
