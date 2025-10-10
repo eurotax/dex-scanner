@@ -19,7 +19,7 @@
     "ethereum",
     "bsc"
   ],
-  "author": "",
+  "author": "eurotax",
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.4.5",
