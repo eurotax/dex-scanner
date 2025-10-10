@@ -209,7 +209,7 @@ export class PairMonitorService {
       );
 
       const checksFormat = this.securityChecks.formatChecks(securityChecks);
-      console.log(`   Security: ${checksFormat.shortFormat} (${securityChecks.score}/3)`);
+      console.log(`   Security: ${checksFormat.shortFormat}`);
 
       // Step 4: Prepare pair data
       const pairData = {

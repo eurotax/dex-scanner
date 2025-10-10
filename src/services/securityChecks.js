@@ -140,12 +140,19 @@ export class SecurityChecksService {
       lpLocked: checks.lpLocked ? '✅' : '❌',
     };
 
+    // Security score emoji
+    let scoreEmoji = '🔴'; // 0/3 - High risk
+    if (checks.score === 1) scoreEmoji = '🟠'; // 1/3 - Medium-high risk
+    if (checks.score === 2) scoreEmoji = '🟡'; // 2/3 - Medium risk  
+    if (checks.score === 3) scoreEmoji = '🟢'; // 3/3 - Low risk
+
     return {
-      shortFormat: `${icons.verified}${icons.renounced}${icons.lpLocked}`,
+      shortFormat: `${icons.verified}${icons.renounced}${icons.lpLocked} ${scoreEmoji}`,
       longFormat: [
         `${icons.verified} Code ${checks.verified ? 'verified' : 'not verified'}`,
         `${icons.renounced} Owner ${checks.renounced ? 'renounced' : 'not renounced'}`,
         `${icons.lpLocked} LP ${checks.lpLocked ? 'locked' : 'not locked'}`,
+        `   Score: ${checks.score}/3 ${scoreEmoji}`,
       ].join('\n'),
       score: checks.score,
       warnings: checks.warnings,
