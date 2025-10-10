@@ -1,5 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
-import { config } from '../config.js';
+import { config, getExplorerBaseUrl, getDexBaseUrl } from '../config.js';
 
 export class TelegramService {
   constructor(botToken = null, vipChatId = null, publicChatId = null) {
@@ -128,6 +128,22 @@ export class TelegramService {
       securityChecks,
     } = pairData;
     
+    // Get explorer and DEX URLs
+    const explorerBase = getExplorerBaseUrl(config.chainId);
+    const dexBase = getDexBaseUrl(config.chainId);
+    
+    // Build links section if enabled
+    let linksSection = '';
+    if (config.features.includeLinks) {
+      linksSection = `\n🔗 *Quick Links:*
+   [View Pair](${explorerBase}/address/${pairAddress})
+   [Token0](${explorerBase}/token/${token0.address})
+   [Token1](${explorerBase}/token/${token1.address})
+   [Transaction](${explorerBase}/tx/${transactionHash})
+   [Trade on DEX](${dexBase}/#/swap?outputCurrency=${token0.address})
+`;
+    }
+    
     // Create message
     const message = `
 🆕 *New High Liquidity Pair*
@@ -146,7 +162,7 @@ export class TelegramService {
 
 🔒 *Security Checks:*
 ${securityChecks.longFormat}
-
+${linksSection}
 🔗 Block: ${blockNumber || 'N/A'}
 📝 TX: \`${transactionHash || 'N/A'}\`
     `.trim();
@@ -209,6 +225,74 @@ ${error.message || error.toString()}
       promises.push(
         this.sendMessage(this.legacyChatId, message).catch(err => 
           console.error('Failed to send error to legacy:', err.message)
+        )
+      );
+    }
+    
+    await Promise.allSettled(promises);
+  }
+
+  async sendStatistics(stats, uptime) {
+    if (!config.features.sendStats) {
+      return;
+    }
+
+    const uptimeHours = Math.floor(uptime / 3600000);
+    const uptimeMinutes = Math.floor((uptime % 3600000) / 60000);
+    const uptimeStr = uptimeHours > 0 
+      ? `${uptimeHours}h ${uptimeMinutes}m`
+      : `${uptimeMinutes}m`;
+
+    const filterRate = stats.total > 0
+      ? ((stats.filtered / stats.total) * 100).toFixed(1)
+      : '0.0';
+
+    const message = `
+📊 *Periodic Statistics Report*
+
+⏱️ *Uptime:* ${uptimeStr}
+
+🔍 *Pair Detection:*
+   Total pairs detected: ${stats.total}
+   Filtered (low liquidity): ${stats.filtered}
+   Filter rate: ${filterRate}%
+
+📱 *Alerts Sent:*
+   VIP channel (>${config.liquidity.minVIP / 1000}k): ${stats.vip}
+   Public channel (>${config.liquidity.minPublic / 1000}k): ${stats.public}
+   Total alerts: ${stats.vip + stats.public}
+
+❌ *Errors:*
+   Processing errors: ${stats.errors || 0}
+
+✅ Bot is running smoothly
+    `.trim();
+
+    const promises = [];
+    
+    // Send to VIP channel
+    if (this.vipChatId) {
+      promises.push(
+        this.sendToVipChannel(message).catch(err => 
+          console.error('Failed to send stats to VIP:', err.message)
+        )
+      );
+    }
+    
+    // Send to Public channel
+    if (this.publicChatId) {
+      promises.push(
+        this.sendToPublicChannel(message).catch(err => 
+          console.error('Failed to send stats to Public:', err.message)
+        )
+      );
+    }
+    
+    // Send to legacy channel if no VIP configured
+    if (this.legacyChatId && !this.vipChatId) {
+      promises.push(
+        this.sendMessage(this.legacyChatId, message).catch(err => 
+          console.error('Failed to send stats to legacy:', err.message)
         )
       );
     }

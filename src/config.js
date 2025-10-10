@@ -52,12 +52,18 @@ export const config = {
   monitoring: {
     pollInterval: parseInt(process.env.POLL_INTERVAL || '60000', 10),
     eventPollInterval: parseInt(process.env.EVENT_POLL_INTERVAL || '30000', 10),
+    statsInterval: parseInt(process.env.STATS_INTERVAL || '3600000', 10), // 1 hour default
   },
   
   backoff: {
     maxRetries: parseInt(process.env.BACKOFF_MAX_RETRIES || '5', 10),
     initialDelay: parseInt(process.env.BACKOFF_INITIAL_DELAY || '1000', 10),
     maxDelay: parseInt(process.env.BACKOFF_MAX_DELAY || '60000', 10),
+  },
+  
+  features: {
+    sendStats: process.env.SEND_STATS !== 'false', // enabled by default
+    includeLinks: process.env.INCLUDE_LINKS !== 'false', // enabled by default
   },
 };
 
@@ -82,6 +88,28 @@ function getDefaultExplorerUrl(chainId) {
   };
   return explorerUrls[chainId] || explorerUrls[1];
 }
+
+function getExplorerBaseUrl(chainId) {
+  const explorerBaseUrls = {
+    1: 'https://etherscan.io',
+    56: 'https://bscscan.com',
+    137: 'https://polygonscan.com',
+    42161: 'https://arbiscan.io',
+  };
+  return explorerBaseUrls[chainId] || explorerBaseUrls[1];
+}
+
+function getDexBaseUrl(chainId) {
+  const dexUrls = {
+    1: 'https://app.uniswap.org',
+    56: 'https://pancakeswap.finance',
+    137: 'https://quickswap.exchange',
+    42161: 'https://app.sushi.com',
+  };
+  return dexUrls[chainId] || dexUrls[1];
+}
+
+export { getExplorerBaseUrl, getDexBaseUrl };
 
 export function validateConfig() {
   const errors = [];
@@ -115,6 +143,7 @@ export function validateConfig() {
   console.log(`   Explorer API: ${config.etherscan.apiUrl} (V2 - future-proof)`);
   console.log(`   Poll Interval: ${config.monitoring.pollInterval}ms`);
   console.log(`   Event Poll Interval: ${config.monitoring.eventPollInterval}ms`);
+  console.log(`   Statistics Interval: ${config.monitoring.statsInterval}ms (${Math.floor(config.monitoring.statsInterval / 60000)} min)`);
   
   // Show liquidity thresholds
   console.log('\n💧 Liquidity Filters (Instant Alerts):');
@@ -132,6 +161,11 @@ export function validateConfig() {
   if (config.telegram.chatId && !config.telegram.vipChatId) {
     console.log(`   ✅ Legacy Channel: ${config.telegram.chatId}`);
   }
+  
+  // Show features
+  console.log('\n⚙️  Features:');
+  console.log(`   📊 Periodic statistics: ${config.features.sendStats ? 'Enabled' : 'Disabled'}`);
+  console.log(`   🔗 Include explorer links: ${config.features.includeLinks ? 'Enabled' : 'Disabled'}`);
   
   if (warnings.length > 0) {
     console.log('\n⚠️ Warnings:');
