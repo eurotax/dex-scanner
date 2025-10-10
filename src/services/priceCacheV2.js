@@ -20,6 +20,7 @@ export class PriceCacheV2Service {
     this.redisAvailable = false;
     this.memoryCache = new Map(); // Fallback cache
     this.updateInterval = null;
+    this.cleanupInterval = null;
     this.isUpdating = false;
     
     // Cache TTL
@@ -106,6 +107,11 @@ export class PriceCacheV2Service {
     this.updateInterval = setInterval(() => {
       this.updatePrices();
     }, updateInterval);
+
+    // Start memory cleanup (every 5 minutes)
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupMemoryCache();
+    }, 300000);
 
     console.log(`   ⏱️  Update interval: ${updateInterval / 1000}s`);
     console.log('✅ Price Cache V2 Service initialized');
@@ -283,7 +289,7 @@ export class PriceCacheV2Service {
    */
   async getPrice(symbol) {
     try {
-      if (this.redisAvailable) {
+      if (this.redisAvailable && this.redis) {
         const cached = await this.redis.get(`price:${symbol}`);
         if (cached) {
           return parseFloat(cached);
@@ -307,7 +313,7 @@ export class PriceCacheV2Service {
    */
   async setPrice(symbol, price) {
     try {
-      if (this.redisAvailable) {
+      if (this.redisAvailable && this.redis) {
         await this.redis.setex(`price:${symbol}`, this.cacheTTL, price.toString());
       } else {
         // Use memory cache
@@ -377,11 +383,17 @@ export class PriceCacheV2Service {
   cleanupMemoryCache() {
     const now = Date.now();
     const ttlMs = this.cacheTTL * 1000;
+    let cleaned = 0;
 
     for (const [key, value] of this.memoryCache.entries()) {
       if (now - value.timestamp > ttlMs) {
         this.memoryCache.delete(key);
+        cleaned++;
       }
+    }
+
+    if (cleaned > 0) {
+      console.log(`   🧹 Cleaned ${cleaned} expired cache entries`);
     }
   }
 
@@ -397,14 +409,22 @@ export class PriceCacheV2Service {
       this.updateInterval = null;
     }
 
-    // Disconnect Redis
-    if (this.redis) {
+    // Stop cleanup interval
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+
+    // Disconnect Redis only if connected
+    if (this.redis && this.redisAvailable) {
       try {
         await this.redis.quit();
+        console.log('   ✅ Redis disconnected');
       } catch (error) {
-        // Ignore errors
+        console.warn('   ⚠️  Redis disconnect error:', error.message);
       }
       this.redis = null;
+      this.redisAvailable = false;
     }
 
     // Clear memory cache
