@@ -1,0 +1,28 @@
+# .github/workflows/claude-ping.yml
+name: Claude Ping
+on: workflow_dispatch
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    env:
+      # TU podłączasz sekret po nazwie z GitHuba
+      ANTHROPIC_API_KEY: ${{ secrets.DEX_SCANER }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install anthropic
+      - name: Call Claude
+        run: |
+          python - <<'PY'
+          import os, anthropic
+          # Odczytujesz klucz z ENV (nie wklejasz go w kodzie)
+          client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+          r = client.messages.create(
+              model="claude-3-5-sonnet-latest",
+              max_tokens=100,
+              messages=[{"role":"user","content":"Napisz: Połączenie z Claude działa."}]
+          )
+          print(r.content[0].text)
+          PY
