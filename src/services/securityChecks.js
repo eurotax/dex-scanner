@@ -67,7 +67,23 @@ export class SecurityChecksService {
   async isCodeVerified(tokenAddress) {
     try {
       const sourceCode = await this.explorer.getContractSourceCode(tokenAddress);
-      return sourceCode.SourceCode && sourceCode.SourceCode !== '';
+      
+      // Check if SourceCode exists and is not empty
+      const hasSourceCode = !!(sourceCode.SourceCode && sourceCode.SourceCode.trim() !== '');
+      
+      // Check if ABI is valid (not an error message)
+      const hasValidABI = !!(sourceCode.ABI && 
+                         sourceCode.ABI !== 'Contract source code not verified' &&
+                         sourceCode.ABI.trim() !== '');
+      
+      // Contract is verified if it has both source code and valid ABI
+      const isVerified = hasSourceCode && hasValidABI;
+      
+      if (!isVerified) {
+        console.debug(`Contract ${tokenAddress} verification status: SourceCode=${hasSourceCode}, ValidABI=${hasValidABI}`);
+      }
+      
+      return isVerified;
     } catch (error) {
       console.warn(`Could not check verification for ${tokenAddress}:`, error.message);
       return false;
