@@ -79,6 +79,12 @@ export class PairMonitorService {
       this.statsInterval = null;
     }
     
+    // Send shutdown message with final statistics
+    if (this.startTime) {
+      const uptime = Date.now() - this.startTime;
+      await this.telegram.sendShutdownMessage(this.stats, uptime);
+    }
+    
     // Shutdown services
     this.priceCache.shutdown();
     await this.telegram.shutdown();
@@ -136,7 +142,11 @@ export class PairMonitorService {
         }
       } catch (error) {
         console.error('❌ Error checking for new pairs:', error.message);
-        await this.telegram.sendError(error);
+        this.stats.errors++;
+        // Only send error notifications for critical errors, not every poll failure
+        if (error.message.includes('CALL_EXCEPTION') || error.message.includes('missing revert')) {
+          await this.telegram.sendError(error);
+        }
       }
     };
 

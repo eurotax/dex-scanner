@@ -82,7 +82,22 @@ export class TelegramService {
   }
 
   async sendStartupMessage() {
-    const startupMsg = `🚀 *DEX Scanner Started*\n\n✅ Monitoring for new pairs\n💧 Liquidity filters active\n⏰ Started at: ${new Date().toLocaleString()}`;
+    const features = [];
+    if (config.features.sendStats) {
+      features.push(`📊 Stats every ${Math.floor(config.monitoring.statsInterval / 60000)}min`);
+    }
+    if (config.features.includeLinks) {
+      features.push('🔗 Explorer links enabled');
+    }
+    
+    const featuresText = features.length > 0 ? `\n🎯 Features: ${features.join(', ')}` : '';
+    
+    const startupMsg = `🚀 *DEX Scanner Started*
+
+✅ Monitoring for new pairs
+💧 VIP alerts: >$${(config.liquidity.minVIP / 1000).toFixed(0)}k USD
+💧 Public alerts: >$${(config.liquidity.minPublic / 1000).toFixed(0)}k USD${featuresText}
+⏰ Started: ${new Date().toLocaleString()}`;
     
     const promises = [];
     
@@ -293,6 +308,63 @@ ${error.message || error.toString()}
       promises.push(
         this.sendMessage(this.legacyChatId, message).catch(err => 
           console.error('Failed to send stats to legacy:', err.message)
+        )
+      );
+    }
+    
+    await Promise.allSettled(promises);
+  }
+
+  async sendShutdownMessage(stats, uptime) {
+    const uptimeHours = Math.floor(uptime / 3600000);
+    const uptimeMinutes = Math.floor((uptime % 3600000) / 60000);
+    const uptimeStr = uptimeHours > 0 
+      ? `${uptimeHours}h ${uptimeMinutes}m`
+      : `${uptimeMinutes}m`;
+
+    const filterRate = stats.total > 0
+      ? ((stats.filtered / stats.total) * 100).toFixed(1)
+      : '0.0';
+
+    const message = `
+🛑 *DEX Scanner Shutdown*
+
+⏱️ *Total Uptime:* ${uptimeStr}
+
+📊 *Final Statistics:*
+   Pairs detected: ${stats.total}
+   Alerts sent: ${stats.vip + stats.public} (VIP: ${stats.vip}, Public: ${stats.public})
+   Filtered: ${stats.filtered} (${filterRate}%)
+   Errors: ${stats.errors || 0}
+
+👋 Scanner stopped at ${new Date().toLocaleString()}
+    `.trim();
+
+    const promises = [];
+    
+    // Send to VIP channel
+    if (this.vipChatId) {
+      promises.push(
+        this.sendToVipChannel(message).catch(err => 
+          console.error('Failed to send shutdown to VIP:', err.message)
+        )
+      );
+    }
+    
+    // Send to Public channel
+    if (this.publicChatId) {
+      promises.push(
+        this.sendToPublicChannel(message).catch(err => 
+          console.error('Failed to send shutdown to Public:', err.message)
+        )
+      );
+    }
+    
+    // Send to legacy channel if no VIP configured
+    if (this.legacyChatId && !this.vipChatId) {
+      promises.push(
+        this.sendMessage(this.legacyChatId, message).catch(err => 
+          console.error('Failed to send shutdown to legacy:', err.message)
         )
       );
     }
