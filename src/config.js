@@ -42,11 +42,41 @@ export const config = {
     // Minimum liquidity thresholds in USD
     minVIP: parseInt(process.env.MIN_LIQUIDITY_VIP || '10000', 10),      // $10k for VIP
     minPublic: parseInt(process.env.MIN_LIQUIDITY_PUBLIC || '35000', 10), // $35k for Public
+    // Sprint 1: 3-tier system thresholds
+    earlyGemsMin: parseInt(process.env.LIQUIDITY_EARLY_GEMS_MIN || '1000', 10),  // $1k for Early Gems
+    earlyGemsMinHolders: parseInt(process.env.HOLDERS_EARLY_GEMS_MIN || '50', 10),
+    megaMin: parseInt(process.env.LIQUIDITY_MEGA_MIN || '50000', 10),     // $50k for Mega
   },
   
   priceCache: {
     // Update interval for price cache (default: 5 minutes)
     updateInterval: parseInt(process.env.PRICE_UPDATE_INTERVAL || '300000', 10),
+    // Cache TTL in seconds (default: 60s for V2)
+    ttl: parseInt(process.env.PRICE_CACHE_TTL || '60', 10),
+  },
+  
+  // Sprint 1: Redis configuration
+  redis: {
+    url: process.env.REDIS_URL || null,
+  },
+  
+  // Sprint 1: Multi-RPC configuration
+  rpc: {
+    primaryUrl: process.env.RPC_URL || process.env.RPC_PRIMARY_URL,
+    secondaryUrl: process.env.RPC_SECONDARY_URL || null,
+    tertiaryUrl: process.env.RPC_TERTIARY_URL || null,
+    healthCheckInterval: parseInt(process.env.RPC_HEALTH_CHECK_INTERVAL || '60000', 10),
+    maxResponseTime: parseInt(process.env.RPC_MAX_RESPONSE_TIME || '5000', 10),
+  },
+  
+  // Sprint 1: Volume analysis configuration
+  volume: {
+    earlyGemsMin24h: parseInt(process.env.VOLUME_EARLY_GEMS_MIN || '5000', 10),
+    earlyGemsMinSwaps: parseInt(process.env.SWAPS_EARLY_GEMS_MIN || '10', 10),
+    highLiqMin24h: parseInt(process.env.VOLUME_HIGH_LIQ_MIN || '20000', 10),
+    highLiqMinSwaps: parseInt(process.env.SWAPS_HIGH_LIQ_MIN || '15', 10),
+    megaMin24h: parseInt(process.env.VOLUME_MEGA_MIN || '50000', 10),
+    megaMinSwaps: parseInt(process.env.SWAPS_MEGA_MIN || '20', 10),
   },
   
   monitoring: {
