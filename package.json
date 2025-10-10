@@ -1,13 +1,14 @@
 {
   "name": "dex-scanner",
-  "version": "1.1.0",
-  "description": "Background worker for DEX pair monitoring with improved polling support",
+  "version": "2.0.0",
+  "description": "Background worker for DEX pair monitoring with Multi-RPC, Redis cache, and 3-tier filtering",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "node test-connection.js"
+    "test": "node test-connection.js",
+    "test:sprint1": "node test-sprint1.js"
   },
   "keywords": [
     "dex",
@@ -17,7 +18,10 @@
     "uniswap",
     "pancakeswap",
     "ethereum",
-    "bsc"
+    "bsc",
+    "redis",
+    "multi-rpc",
+    "volume-analysis"
   ],
   "author": "",
   "license": "MIT",
